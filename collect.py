@@ -81,8 +81,14 @@ def crawlNaver(cur, url, url_id, url_subject):
     articles = doc.xpath("//*[@id=\"content\"]/div/div[1]/table/tbody/tr")
     hasNew = False
     for a in articles:
-        article_link = 'http://novel.naver.com/' + a.xpath("./td[1]/a/@href")[0]
-        article_subject = a.xpath("./td[1]/a/text()")[0]
+        link_node = a.xpath("./td[1]/a/@href")
+        if len(link_node) == 0: link_node = a.xpath("./td[1]/div/a/@href")
+        article_link = 'http://novel.naver.com/' + link_node[0]
+
+        subject_node = a.xpath("./td[1]/a/text()")
+        if len(subject_node) == 0: subject_node = a.xpath("./td[1]/div/a/text()")
+        article_subject = subject_node[0]
+
         article_id = article_link[article_link.rfind('volumeNo=') + 9:];
         article_date = a.xpath("./td[2]/text()")[0]
 
