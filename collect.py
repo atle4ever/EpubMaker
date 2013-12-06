@@ -3,6 +3,28 @@ import sqlite3 as lite
 import sys
 from lxml import etree
 from webhelpers.feedgenerator import Atom1Feed
+import logging
+
+# create logger with 'spam_application'
+logger = logging.getLogger('FeedMaker')
+logger.setLevel(logging.DEBUG)
+
+# create file handler which logs even debug messages
+fh = logging.FileHandler('log')
+
+# create console handler with a higher log level
+ch = logging.StreamHandler()
+
+# create formatter and add it to the handlers
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+fh.setFormatter(formatter)
+ch.setFormatter(formatter)
+
+# add the handlers to the logger
+logger.addHandler(fh)
+logger.addHandler(ch)
+
+
 
 RUN_DIR = '/home/sjkim/FeedMaker/'
 DROPBOX_PUBIC = '/home/sjkim/Dropbox/public/'
@@ -13,7 +35,7 @@ def publish(cur, site, url_id, url_subject):
     elif site == 'naver':
         url = "http://novel.naver.com/webnovel/list.nhn?novelId={0}".format(url_id)
     else:
-        print "Error: invliad site {0}".format(site)
+        logger.error( "invliad site {0}".format(site) )
         sys.exit(-1)
 
     feed = Atom1Feed(
@@ -60,7 +82,7 @@ def crawl():
             hasNew = crawlNaver(cur, url, url_id, url_subject);
 
         else:
-            print "Error: invliad site {0}".format(site)
+            logger.error( "invliad site {0}".format(site) )
             sys.exit(-1)
         con.commit()
 
@@ -99,7 +121,7 @@ def crawlNaver(cur, url, url_id, url_subject):
         if(ret[0][0] == 0): 
             cur.execute("INSERT INTO article(site, url_id, id, subject, link) VALUES (?, ?, ?, ?, ?)",
                     ('naver', url_id, article_id, article_subject, article_link))
-            print "New article {0} {1} {2}".format(url_id, article_id, article_link)
+            logger.info( "New article {0} {1} {2}".format(url_id, article_id, article_link) )
             hasNew = True
 
     return hasNew
@@ -131,7 +153,7 @@ def crawlMunpia(cur, url, url_id, url_subject):
         if(ret[0][0] == 0): 
             cur.execute("INSERT INTO article(site, url_id, id, subject, link) VALUES (?, ?, ?, ?, ?)",
                     ('munpia', url_id, article_id, article_subject, article_link))
-            print "New article {0} {1} {2}".format(url_id, article_id, article_link)
+            logger.info ( "New article {0} {1} {2}".format(url_id, article_id, article_link) )
             hasNew = True
     
     return hasNew
@@ -145,7 +167,7 @@ def newUrlNaver(site, url_id):
     cur.execute("SELECT count(*) FROM url WHERE site = ? AND id = ?", (site, url_id))
     ret = cur.fetchone()
     if ret[0] != 0:
-        print "Existing url id"
+        logger.warning ( "Existing url id" )
         return
 
     # get subject
@@ -159,7 +181,7 @@ def newUrlNaver(site, url_id):
     subject = doc.xpath("//*[@id=\"content\"]/div/div[1]/div[1]/div/h2/text()")[0].strip()
 
     cur.execute("INSERT INTO url(site, id, subject) VALUES (?, ?, ?)", (site, url_id, subject))
-    print "New url id: {0}".format(url_id)
+    logger.info( "New url id: {0}".format(url_id) )
     con.commit()
     con.close()
 
@@ -172,7 +194,7 @@ def newUrlMunpia(site, url_id):
     cur.execute("SELECT count(*) FROM url WHERE site = ? AND id = ?", (site, url_id))
     ret = cur.fetchone()
     if ret[0] != 0:
-        print "Existing url id"
+        logger.warning( "Existing url id" )
         return
 
     # get subject
@@ -186,13 +208,14 @@ def newUrlMunpia(site, url_id):
     subject = doc.xpath("//*[@id=\"board\"]/div[1]/div[2]/h2/a/text()")[0]
 
     cur.execute("INSERT INTO url(site, id, subject) VALUES (?, ?, ?)", (site, url_id, subject))
-    print "New url id: {0}".format(url_id)
+    logger.info( "New url id: {0}".format(url_id) )
     con.commit()
     con.close()
 
 def usage():
-    print "usage 1: python {0} crawl".format(sys.argv[0])
-    print "usage 2: python {0} add <site> <url id>".format(sys.argv[0])
+    logger.error( "Invalid usage" )
+    logger.error( "usage 1: python {0} crawl".format(sys.argv[0]) )
+    logger.error( "usage 2: python {0} add <site> <url id>".format(sys.argv[0]) )
     return
 
 if len(sys.argv) == 1:
@@ -214,5 +237,5 @@ else: # add command
     elif site == 'naver':
         newUrlNaver(site, url_id)
     else:
-        print "Invalid site {0}".format(site)
+        logger.warning( "Invalid site {0}".format(site) )
         sys.exit(-1)
