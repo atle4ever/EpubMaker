@@ -5,6 +5,7 @@ from lxml import etree
 import logging
 from twitter import *
 import ConfigParser
+import codecs
 
 # config
 config = ConfigParser.ConfigParser()
@@ -31,6 +32,22 @@ ch = logging.StreamHandler()
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 
+def initDB(dbPath):
+    con = lite.connect(dbPath)
+    cur = con.cursor()
+
+    existing = cur.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'url'").fetchone()
+    if existing:
+        return
+
+    cur.execute("CREATE TABLE url (site VARCHAR(20), id INTEGER, subject VARCHAR(1024), primary key(site, id))")
+    cur.execute("CREATE TABLE article (site VARCHAR(20), url_id INTEGER, id INTEGER, subject VARCHAR(1024), link VARCHAR(1024), primary key (site, url_id, id))")
+
+    con.commit()
+    cur.close()
+    con.close()
+
+
 class SqliteConnect:
     def __init__(self, dbPath):
         # TODO: check whether db exist
@@ -47,6 +64,7 @@ class SqliteConnect:
                 'ArticleId': "./td[1]/span/text()",
                 'ArticleDate': "./td[3]/text()",
                 'ArticleLinkPrefix': 'http://novel.munpia.com',
+                'Content': "//*[@class=\"tcontent\"]",
                 },
             'naver': {
                 'UrlFormat': "http://novel.naver.com/webnovel/list.nhn?novelId={0}",
@@ -76,6 +94,97 @@ class SqliteConnect:
         self.con.commit()
 
 class Crawler(SqliteConnect):
+    def getContent(self, site, link):
+        # get html
+        usock = urllib2.urlopen(link)
+        doc = usock.read()
+        usock.close()
+
+        # html parsing
+        hparser = etree.HTMLParser(encoding='utf-8')
+        doc = etree.fromstring(doc, hparser)
+        contents = doc.xpath(self.getXPath(site, 'Content'))
+        assert len(contents) == 1
+        content = contents[0]
+
+        return etree.tostring(content)
+
+
+    def crawlEpub(self):
+        # get url_id and subject
+        self.cur.execute("SELECT site, id, subject FROM url")
+        urls = self.cur.fetchall()
+
+        assert len(urls) == 1
+
+        url = urls[0]
+        site = url[0]
+        url_id = url[1]
+        url_subject = url[2]
+            
+        url = self.genUrl(site, url_id)
+        pageId = 1
+        urlPrefix = url + "/page/"
+        url = urlPrefix + str(pageId)
+
+        contents = []
+        while True:
+            # get html
+            usock = urllib2.urlopen(url)
+            doc = usock.read()
+            usock.close()
+
+            # html parsing
+            hparser = etree.HTMLParser(encoding='utf-8')
+            doc = etree.fromstring(doc, hparser)
+            articles = doc.xpath(self.getXPath(site, 'Articles'))
+
+            for a in articles:
+                article_class = a.xpath("./@class")
+                if len(article_class) > 0 and article_class[0] == "notice":
+                    continue
+
+                for xp in self.getXPath(site, 'ArticleLink'):
+                    link_node = a.xpath(xp)
+                    if len(link_node) != 0: break;
+                assert len(link_node) != 0, "Fail to get article's link"
+                article_link = self.getXPath(site, 'ArticleLinkPrefix') + link_node[0]
+
+                article_content = self.getContent(site, article_link)
+                contents.append(article_content)
+
+                for xp in self.getXPath(site, 'ArticleSubject'):
+                    subject_node = a.xpath(xp)
+                    if len(subject_node) != 0: break;
+                assert len(subject_node) != 0, "Fail to get article's subject"
+                article_subject = subject_node[0]
+                print article_subject
+
+                xp = self.getXPath(site, 'ArticleId')
+                if xp == '':
+                    assert site == 'naver'
+                    article_id = article_link[article_link.rfind('volumeNo=') + 9:];
+                else:
+                    article_id = a.xpath(xp)[0]
+                article_id = int(article_id)
+
+            # check whether this page is last
+            # if article_id == 1:
+            break
+
+            pageId += 1
+            url = urlPrefix + str(pageId)
+
+        self.con.commit()
+        self.con.close()
+
+        contents.reverse()
+
+        f = codecs.open("test.html", 'w', encoding='utf-8')
+        for c in contents:
+            f.write(c)
+        f.close()
+
     def crawl(self):
 
         # create twitter api
@@ -122,11 +231,11 @@ class Crawler(SqliteConnect):
             if len(article_class) > 0 and article_class[0] == "notice":
                 continue
 
-            for xp in self.getXPath(site, 'ArticleLink'):
-                link_node = a.xpath(xp)
-                if len(link_node) != 0: break;
-            assert len(link_node) != 0, "Fail to get article's link"
-            article_link = self.getXPath(site, 'ArticleLinkPrefix') + link_node[0]
+            # for xp in self.getXPath(site, 'ArticleLink'):
+            #     link_node = a.xpath(xp)
+            #     if len(link_node) != 0: break;
+            # assert len(link_node) != 0, "Fail to get article's link"
+            # article_link = self.getXPath(site, 'ArticleLinkPrefix') + link_node[0]
 
             for xp in self.getXPath(site, 'ArticleSubject'):
                 subject_node = a.xpath(xp)
@@ -134,26 +243,26 @@ class Crawler(SqliteConnect):
             assert len(subject_node) != 0, "Fail to get article's subject"
             article_subject = subject_node[0]
     
-            xp = self.getXPath(site, 'ArticleId')
-            if xp == '':
-                assert site == 'naver'
-                article_id = article_link[article_link.rfind('volumeNo=') + 9:];
-            else:
-                article_id = a.xpath(xp)[0]
-            article_date = a.xpath("./td[2]/text()")[0]
+            # xp = self.getXPath(site, 'ArticleId')
+            # if xp == '':
+            #     assert site == 'naver'
+            #     article_id = article_link[article_link.rfind('volumeNo=') + 9:];
+            # else:
+            #     article_id = a.xpath(xp)[0]
+            # article_date = a.xpath("./td[2]/text()")[0]
     
-            self.cur.execute("SELECT count(*) FROM article WHERE site = ? AND url_id = ? AND id = ?", (site, url_id, article_id))
-            ret = self.cur.fetchall()
+            # self.cur.execute("SELECT count(*) FROM article WHERE site = ? AND url_id = ? AND id = ?", (site, url_id, article_id))
+            # ret = self.cur.fetchall()
     
-            # new article
-            if(ret[0][0] == 0): 
-                self.cur.execute("INSERT INTO article(site, url_id, id, subject, link) VALUES (?, ?, ?, ?, ?)",
-                        (site, url_id, article_id, article_subject, article_link))
-                logger.info( u"New article is added: {0} ({1}, {2})".format(article_subject, article_id, article_link) )
+            # # new article
+            # if(ret[0][0] == 0): 
+            #     self.cur.execute("INSERT INTO article(site, url_id, id, subject, link) VALUES (?, ?, ?, ?, ?)",
+            #             (site, url_id, article_id, article_subject, article_link))
+            #     logger.info( u"New article is added: {0} ({1}, {2})".format(article_subject, article_id, article_link) )
 
-                # publish to twitter
-                twt.statuses.update(
-                        status=u"{0}: {1} {2}".format(url_subject, article_subject, article_link))
+            #     # publish to twitter
+            #     twt.statuses.update(
+            #             status=u"{0}: {1} {2}".format(url_subject, article_subject, article_link))
 
 class FeedManager(SqliteConnect):
     def addFeed(self, site, url_id):
@@ -186,6 +295,8 @@ def main():
         logger.error( "usage 1: python {0} crawl".format(sys.argv[0]) )
         logger.error( "usage 2: python {0} add <site> <url id>".format(sys.argv[0]) )
         return
+
+    initDB('./feed.db');
     
     # init Crawer, FeedManager
     crawler = Crawler('./feed.db')
@@ -196,7 +307,7 @@ def main():
         sys.exit(-1)
     
     if sys.argv[1] == 'crawl':
-        crawler.crawl()
+        crawler.crawlEpub()
     else: # add command
         if len(sys.argv) < 4:
             usage()
