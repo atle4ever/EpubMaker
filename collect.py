@@ -1,26 +1,13 @@
+# -*- coding: utf-8 -*-
 import urllib2
-import sqlite3 as lite
 import sys
 from lxml import etree
 import logging
-from twitter import *
 import ConfigParser
 import codecs
 
-# config
-config = ConfigParser.ConfigParser()
-config.read('default.cfg')
-
-# twitter settting
-# note: http://twss.55uk.net <- convert tweet to RSS
-# note: https://github.com/sixohsix/twitter <- python twitter library
-OAUTH_TOKEN = config.get('twitter', 'OAUTH_TOKEN')
-OAUTH_SECRET = config.get('twitter', 'OAUTH_SECRET')
-CONSUMER_KEY = config.get('twitter', 'CONSUMER_KEY')
-CONSUMER_SECRET = config.get('twitter', 'CONSUMER_SECRET')
-
 # logger settting
-logger = logging.getLogger('FeedMaker')
+logger = logging.getLogger('EpubMaker')
 logger.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
 
@@ -32,291 +19,129 @@ ch = logging.StreamHandler()
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 
-def initDB(dbPath):
-    con = lite.connect(dbPath)
-    cur = con.cursor()
+xpath = {
+        'munpia': {
+            'UrlFormat': "http://novel.munpia.com/{0}",
+            'FeedSubject': "//*[@id=\"board\"]/div[1]/div[2]/h2/a/text()",
+            'Articles': "//*[@id=\"ENTRIES\"]/tbody/tr",
+            'ArticleLink': ["./td[2]/a[1]/@href", ],
+            'ArticleSubject': ["./td[2]/a[1]/text()", ],
+            'ArticleId': "./td[1]/span/text()",
+            'ArticleDate': "./td[3]/text()",
+            'ArticleLinkPrefix': 'http://novel.munpia.com',
+            'Content': "//*[@class=\"tcontent\"]",
+            },
+        'naver': {
+            'UrlFormat': "http://novel.naver.com/webnovel/list.nhn?novelId={0}",
+            'FeedSubject': "//*[@id=\"content\"]/div/div[1]/div[1]/div/h2/text()",
+            'Articles': "//*[@id=\"content\"]/div/div[1]/table/tbody/tr",
+            'ArticleLink': ["./td[1]/a/@href", "./td[1]/div/a/@href"],
+            'ArticleSubject': ["./td[1]/a/text()", "./td[1]/div/a/text()"],
+            'ArticleId': '', 
+            'ArticleDate': "./td[2]/text()",
+            'ArticleLinkPrefix': 'http://novel.naver.com/',
+            },
+        }
 
-    existing = cur.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'url'").fetchone()
-    if existing:
-        return
+def getXPath(site, target):
+    siteXPath = xpath.get(site)
+    assert siteXPath != None, "Invalid site: '{0}'".format(site)
 
-    cur.execute("CREATE TABLE url (site VARCHAR(20), id INTEGER, subject VARCHAR(1024), primary key(site, id))")
-    cur.execute("CREATE TABLE article (site VARCHAR(20), url_id INTEGER, id INTEGER, subject VARCHAR(1024), link VARCHAR(1024), primary key (site, url_id, id))")
+    xp = siteXPath.get(target);
+    assert xp != None, "Invalid target: '{0}' for '{1}'".format(target, site)
 
-    con.commit()
-    cur.close()
-    con.close()
+    return xp
+        
+def genUrl(site, url_id):
+    return getXPath(site, 'UrlFormat').format(url_id)
+
+def getContent(site, link):
+    # get html
+    usock = urllib2.urlopen(link)
+    doc = usock.read()
+    usock.close()
+
+    # html parsing
+    hparser = etree.HTMLParser(encoding='utf-8')
+    doc = etree.fromstring(doc, hparser)
+    contents = doc.xpath(getXPath(site, 'Content'))
+    assert len(contents) == 1
+    content = contents[0]
+
+    return etree.tostring(content)
 
 
-class SqliteConnect:
-    def __init__(self, dbPath):
-        # TODO: check whether db exist
-        self.con = lite.connect(dbPath)
-        self.cur = self.con.cursor()
+def makeEpub(site, url_id):
+    # get url_id and subject
 
-    xpath = {
-            'munpia': {
-                'UrlFormat': "http://novel.munpia.com/{0}",
-                'FeedSubject': "//*[@id=\"board\"]/div[1]/div[2]/h2/a/text()",
-                'Articles': "//*[@id=\"ENTRIES\"]/tbody/tr",
-                'ArticleLink': ["./td[2]/a[1]/@href", ],
-                'ArticleSubject': ["./td[2]/a[1]/text()", ],
-                'ArticleId': "./td[1]/span/text()",
-                'ArticleDate': "./td[3]/text()",
-                'ArticleLinkPrefix': 'http://novel.munpia.com',
-                'Content': "//*[@class=\"tcontent\"]",
-                },
-            'naver': {
-                'UrlFormat': "http://novel.naver.com/webnovel/list.nhn?novelId={0}",
-                'FeedSubject': "//*[@id=\"content\"]/div/div[1]/div[1]/div/h2/text()",
-                'Articles': "//*[@id=\"content\"]/div/div[1]/table/tbody/tr",
-                'ArticleLink': ["./td[1]/a/@href", "./td[1]/div/a/@href"],
-                'ArticleSubject': ["./td[1]/a/text()", "./td[1]/div/a/text()"],
-                'ArticleId': '', 
-                'ArticleDate': "./td[2]/text()",
-                'ArticleLinkPrefix': 'http://novel.naver.com/',
-                },
-            }
+    url = genUrl(site, url_id)
+    pageId = 1
+    urlPrefix = url + "/page/"
+    url = urlPrefix + str(pageId)
 
-    def getXPath(self, site, target):
-        siteXPath = self.xpath.get(site)
-        assert siteXPath != None, "Invalid site: '{0}'".format(site)
-
-        xp = siteXPath.get(target);
-        assert xp != None, "Invalid target: '{0}' for '{1}'".format(target, site)
-
-        return xp
-            
-    def genUrl(self, site, url_id):
-        return self.getXPath(site, 'UrlFormat').format(url_id)
-
-    def commit(self):
-        self.con.commit()
-
-class Crawler(SqliteConnect):
-    def getContent(self, site, link):
+    contents = []
+    while True:
         # get html
-        usock = urllib2.urlopen(link)
+        usock = urllib2.urlopen(url)
         doc = usock.read()
         usock.close()
 
         # html parsing
         hparser = etree.HTMLParser(encoding='utf-8')
         doc = etree.fromstring(doc, hparser)
-        contents = doc.xpath(self.getXPath(site, 'Content'))
-        assert len(contents) == 1
-        content = contents[0]
-
-        return etree.tostring(content)
-
-
-    def crawlEpub(self):
-        # get url_id and subject
-        self.cur.execute("SELECT site, id, subject FROM url")
-        urls = self.cur.fetchall()
-
-        assert len(urls) == 1
-
-        url = urls[0]
-        site = url[0]
-        url_id = url[1]
-        url_subject = url[2]
-            
-        url = self.genUrl(site, url_id)
-        pageId = 1
-        urlPrefix = url + "/page/"
-        url = urlPrefix + str(pageId)
-
-        contents = []
-        while True:
-            # get html
-            usock = urllib2.urlopen(url)
-            doc = usock.read()
-            usock.close()
-
-            # html parsing
-            hparser = etree.HTMLParser(encoding='utf-8')
-            doc = etree.fromstring(doc, hparser)
-            articles = doc.xpath(self.getXPath(site, 'Articles'))
-
-            for a in articles:
-                article_class = a.xpath("./@class")
-                if len(article_class) > 0 and article_class[0] == "notice":
-                    continue
-
-                for xp in self.getXPath(site, 'ArticleLink'):
-                    link_node = a.xpath(xp)
-                    if len(link_node) != 0: break;
-                assert len(link_node) != 0, "Fail to get article's link"
-                article_link = self.getXPath(site, 'ArticleLinkPrefix') + link_node[0]
-
-                article_content = self.getContent(site, article_link)
-                contents.append(article_content)
-
-                for xp in self.getXPath(site, 'ArticleSubject'):
-                    subject_node = a.xpath(xp)
-                    if len(subject_node) != 0: break;
-                assert len(subject_node) != 0, "Fail to get article's subject"
-                article_subject = subject_node[0]
-                print article_subject
-
-                xp = self.getXPath(site, 'ArticleId')
-                if xp == '':
-                    assert site == 'naver'
-                    article_id = article_link[article_link.rfind('volumeNo=') + 9:];
-                else:
-                    article_id = a.xpath(xp)[0]
-                article_id = int(article_id)
-
-            # check whether this page is last
-            # if article_id == 1:
-            break
-
-            pageId += 1
-            url = urlPrefix + str(pageId)
-
-        self.con.commit()
-        self.con.close()
-
-        contents.reverse()
-
-        f = codecs.open("test.html", 'w', encoding='utf-8')
-        for c in contents:
-            f.write(c)
-        f.close()
-
-    def crawl(self):
-
-        # create twitter api
-        twt = Twitter(
-                auth=OAuth(OAUTH_TOKEN, OAUTH_SECRET,
-                    CONSUMER_KEY, CONSUMER_SECRET)
-                )
-        while True:
-            tweets = twt.statuses.home_timeline()
-            if len(tweets) == 0: break;
-            for tweet in tweets:
-                tid = tweet['id']
-                twt.statuses.destroy(id=tid)
-                print 'destroy'
-
-        # get url_id and subject
-        self.cur.execute("SELECT site, id, subject FROM url")
-        urls = self.cur.fetchall()
-        
-        for url in urls:
-            site = url[0]
-            url_id = url[1]
-            url_subject = url[2]
-            
-            # get html
-            url = self.genUrl(site, url_id)
-            usock = urllib2.urlopen(url)
-            doc = usock.read()
-            usock.close()
-
-            self.crawlFeed(twt, site, url_id, url_subject, doc)
-            self.con.commit()
-
-        self.con.close()
-
-    def crawlFeed(self, twt, site, url_id, url_subject, doc):
-        # html parsing
-        hparser = etree.HTMLParser(encoding='utf-8')
-        doc = etree.fromstring(doc, hparser)
-        articles = doc.xpath(self.getXPath(site, 'Articles'))
+        articles = doc.xpath(getXPath(site, 'Articles'))
 
         for a in articles:
             article_class = a.xpath("./@class")
             if len(article_class) > 0 and article_class[0] == "notice":
                 continue
 
-            # for xp in self.getXPath(site, 'ArticleLink'):
-            #     link_node = a.xpath(xp)
-            #     if len(link_node) != 0: break;
-            # assert len(link_node) != 0, "Fail to get article's link"
-            # article_link = self.getXPath(site, 'ArticleLinkPrefix') + link_node[0]
+            for xp in getXPath(site, 'ArticleLink'):
+                link_node = a.xpath(xp)
+                if len(link_node) != 0: break;
+            assert len(link_node) != 0, "Fail to get article's link"
+            article_link = getXPath(site, 'ArticleLinkPrefix') + link_node[0]
 
-            for xp in self.getXPath(site, 'ArticleSubject'):
+            article_content = getContent(site, article_link)
+
+            for xp in getXPath(site, 'ArticleSubject'):
                 subject_node = a.xpath(xp)
                 if len(subject_node) != 0: break;
             assert len(subject_node) != 0, "Fail to get article's subject"
             article_subject = subject_node[0]
-    
-            # xp = self.getXPath(site, 'ArticleId')
-            # if xp == '':
-            #     assert site == 'naver'
-            #     article_id = article_link[article_link.rfind('volumeNo=') + 9:];
-            # else:
-            #     article_id = a.xpath(xp)[0]
-            # article_date = a.xpath("./td[2]/text()")[0]
-    
-            # self.cur.execute("SELECT count(*) FROM article WHERE site = ? AND url_id = ? AND id = ?", (site, url_id, article_id))
-            # ret = self.cur.fetchall()
-    
-            # # new article
-            # if(ret[0][0] == 0): 
-            #     self.cur.execute("INSERT INTO article(site, url_id, id, subject, link) VALUES (?, ?, ?, ?, ?)",
-            #             (site, url_id, article_id, article_subject, article_link))
-            #     logger.info( u"New article is added: {0} ({1}, {2})".format(article_subject, article_id, article_link) )
+            logger.info(article_subject)
 
-            #     # publish to twitter
-            #     twt.statuses.update(
-            #             status=u"{0}: {1} {2}".format(url_subject, article_subject, article_link))
+            contents.append( [article_subject, article_content] )
 
-class FeedManager(SqliteConnect):
-    def addFeed(self, site, url_id):
-        # get url_id and subject
-        self.cur.execute("SELECT count(*) FROM url WHERE site = ? AND id = ?", (site, url_id))
-        ret = self.cur.fetchone()
-        if ret[0] != 0:
-            logger.warning ( u"Existing url id {0}".format(url_id) )
-            return False
-    
-        # get subject
-        url = self.genUrl(site, url_id)
-        usock = urllib2.urlopen(url)
-        doc = usock.read()
-        usock.close()
-            
-        hparser = etree.HTMLParser(encoding='utf-8')
-        doc = etree.fromstring(doc, hparser)
-        subject = doc.xpath(self.getXPath(site, 'FeedSubject'))[0].strip()
-    
-        self.cur.execute("INSERT INTO url(site, id, subject) VALUES (?, ?, ?)", (site, url_id, subject))
-        logger.info( u"New feed is added: {0} ({1}, {2})".format(subject, site, url_id) )
-        self.con.commit()
+            xp = getXPath(site, 'ArticleId')
+            if xp == '':
+                assert site == 'naver'
+                article_id = article_link[article_link.rfind('volumeNo=') + 9:];
+            else:
+                article_id = a.xpath(xp)[0]
+            article_id = int(article_id)
 
-        return True
+        # check whether this page is last
+        if article_id == 1:
+            break
+        # break
 
-def main():
-    def usage():
-        logger.error( "Invalid usage" )
-        logger.error( "usage 1: python {0} crawl".format(sys.argv[0]) )
-        logger.error( "usage 2: python {0} add <site> <url id>".format(sys.argv[0]) )
-        return
+        pageId += 1
+        url = urlPrefix + str(pageId)
 
-    initDB('./feed.db');
-    
-    # init Crawer, FeedManager
-    crawler = Crawler('./feed.db')
-    manager = FeedManager('./feed.db')
-    
-    if len(sys.argv) == 1:
-        usage()
-        sys.exit(-1)
-    
-    if sys.argv[1] == 'crawl':
-        crawler.crawlEpub()
-    else: # add command
-        if len(sys.argv) < 4:
-            usage()
-            sys.exit(-1)
-    
-        site = sys.argv[2]
-        url_id = int(sys.argv[3])
-    
-        manager.addFeed(site, url_id)
+    contents.reverse()
+
+    f = codecs.open("test.html", 'w', encoding='utf-8')
+    f.write(u"<html><head><title>세이버나이츠</title></head><body>")
+    for c in contents:
+        f.write(u"<h2>{0}</h2>".format(c[0]))
+        f.write(c[1])
+    f.write(u"</body></html>")
+    f.close()
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) < 3:
+        logger.error("Invalid usage")
+        sys.exit(-1)
+    
+    makeEpub(sys.argv[1], sys.argv[2])
