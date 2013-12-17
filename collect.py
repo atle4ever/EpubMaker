@@ -2,32 +2,34 @@ import urllib2
 import sqlite3 as lite
 import sys
 from lxml import etree
-from webhelpers.feedgenerator import Atom1Feed
 import logging
+from twitter import *
+import ConfigParser
 
-# create logger with 'spam_application'
+# config
+config = ConfigParser.ConfigParser()
+config.read('default.cfg')
+
+# twitter settting
+# note: http://twss.55uk.net <- convert tweet to RSS
+# note: https://github.com/sixohsix/twitter <- python twitter library
+OAUTH_TOKEN = config.get('twitter', 'OAUTH_TOKEN')
+OAUTH_SECRET = config.get('twitter', 'OAUTH_SECRET')
+CONSUMER_KEY = config.get('twitter', 'CONSUMER_KEY')
+CONSUMER_SECRET = config.get('twitter', 'CONSUMER_SECRET')
+
+# logger settting
 logger = logging.getLogger('FeedMaker')
 logger.setLevel(logging.DEBUG)
-
-# create file handler which logs even debug messages
-fh = logging.FileHandler('log')
-
-# create console handler with a higher log level
-ch = logging.StreamHandler()
-
-# create formatter and add it to the handlers
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+
+fh = logging.FileHandler('log')
 fh.setFormatter(formatter)
-ch.setFormatter(formatter)
-
-# add the handlers to the logger
 logger.addHandler(fh)
+
+ch = logging.StreamHandler()
+ch.setFormatter(formatter)
 logger.addHandler(ch)
-
-
-
-RUN_DIR = '/home/sjkim/FeedMaker/'
-DROPBOX_PUBIC = '/home/sjkim/Dropbox/public/'
 
 class SqliteConnect:
     def __init__(self, dbPath):
@@ -74,32 +76,21 @@ class SqliteConnect:
         self.con.commit()
 
 class Crawler(SqliteConnect):
-    def publish(self, site, url_id, url_subject):
-        url = self.genUrl(site, url_id)
-    
-        feed = Atom1Feed(
-                title=url_subject,
-                link=url,
-                description=url_subject,
-                language=u"kr",
-                )
-    
-        self.cur.execute("SELECT subject, link FROM article WHERE site = ? AND url_id = ? order by id desc", (site, url_id))
-        ret = self.cur.fetchall()
-        for a in ret:
-            article_subject = a[0]
-            article_link = a[1]
-            feed.add_item(title=article_subject,
-                    link=article_link,
-                    description="")
-    
-        xml = open(DROPBOX_PUBIC + "{0}_{1}.xml".format(site, url_id), "w")
-        xml.write(feed.writeString('utf-8'))
-        xml.close()
-
-        logger.info(u"feed is generated: {0}, {1}{2}_{3}.xml".format(url_subject, DROPBOX_PUBIC, site, url_id))
-    
     def crawl(self):
+
+        # create twitter api
+        twt = Twitter(
+                auth=OAuth(OAUTH_TOKEN, OAUTH_SECRET,
+                    CONSUMER_KEY, CONSUMER_SECRET)
+                )
+        while True:
+            tweets = twt.statuses.home_timeline()
+            if len(tweets) == 0: break;
+            for tweet in tweets:
+                tid = tweet['id']
+                twt.statuses.destroy(id=tid)
+                print 'destroy'
+
         # get url_id and subject
         self.cur.execute("SELECT site, id, subject FROM url")
         urls = self.cur.fetchall()
@@ -115,19 +106,17 @@ class Crawler(SqliteConnect):
             doc = usock.read()
             usock.close()
 
-            hasNew = self.crawlFeed(site, url_id, doc)
+            self.crawlFeed(twt, site, url_id, url_subject, doc)
+            self.con.commit()
 
-            if hasNew == True:
-                self.con.commit()
-                self.publish(site, url_id, url_subject)
         self.con.close()
 
-    def crawlFeed(self, site, url_id, doc):
+    def crawlFeed(self, twt, site, url_id, url_subject, doc):
         # html parsing
         hparser = etree.HTMLParser(encoding='utf-8')
         doc = etree.fromstring(doc, hparser)
         articles = doc.xpath(self.getXPath(site, 'Articles'))
-        hasNew = False
+
         for a in articles:
             article_class = a.xpath("./@class")
             if len(article_class) > 0 and article_class[0] == "notice":
@@ -161,9 +150,10 @@ class Crawler(SqliteConnect):
                 self.cur.execute("INSERT INTO article(site, url_id, id, subject, link) VALUES (?, ?, ?, ?, ?)",
                         (site, url_id, article_id, article_subject, article_link))
                 logger.info( u"New article is added: {0} ({1}, {2})".format(article_subject, article_id, article_link) )
-                hasNew = True
-    
-        return hasNew
+
+                # publish to twitter
+                twt.statuses.update(
+                        status=u"{0}: {1} {2}".format(url_subject, article_subject, article_link))
 
 class FeedManager(SqliteConnect):
     def addFeed(self, site, url_id):
@@ -198,8 +188,8 @@ def main():
         return
     
     # init Crawer, FeedManager
-    crawler = Crawler('/home/sjkim/FeedMaker/feed.db')
-    manager = FeedManager('/home/sjkim/FeedMaker/feed.db')
+    crawler = Crawler('./feed.db')
+    manager = FeedManager('./feed.db')
     
     if len(sys.argv) == 1:
         usage()

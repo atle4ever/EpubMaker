@@ -4,6 +4,35 @@ import sqlite3 as lite
 import unittest
 import os
 import codecs
+from twitter import *
+import ConfigParser
+
+# config
+config = ConfigParser.ConfigParser()
+config.read('default.cfg')
+
+# twitter settting
+# note: http://twss.55uk.net <- convert tweet to RSS
+# note: https://github.com/sixohsix/twitter <- python twitter library
+OAUTH_TOKEN = config.get('twitter', 'OAUTH_TOKEN')
+OAUTH_SECRET = config.get('twitter', 'OAUTH_SECRET')
+CONSUMER_KEY = config.get('twitter', 'CONSUMER_KEY')
+CONSUMER_SECRET = config.get('twitter', 'CONSUMER_SECRET')
+
+def resetTwitter():
+    # create twitter api
+    twt = Twitter(
+            auth=OAuth(OAUTH_TOKEN, OAUTH_SECRET,
+                CONSUMER_KEY, CONSUMER_SECRET)
+            )
+    while True:
+        tweets = twt.statuses.home_timeline()
+        if len(tweets) == 0: break;
+        for tweet in tweets:
+            tid = tweet['id']
+            twt.statuses.destroy(id=tid)
+
+    return twt
 
 class TestFeedManager(unittest.TestCase):
     def setUp(self):
@@ -43,6 +72,8 @@ class TestFeedManager(unittest.TestCase):
 
 class TestCrawler(unittest.TestCase):
     def test_parse_valid(self):
+        twt = resetTwitter()
+
         os.system("cp ./testData/empty.db ./feed.db")
         crawler = collect.Crawler('./feed.db')
 
@@ -50,8 +81,8 @@ class TestCrawler(unittest.TestCase):
         cur = con.cursor()
 
         cases = [
-                {'site': 'munpia', 'url_id': 14104, 'results': [ ]},
-                {'site': 'naver', 'url_id': 7, 'results': [ ]},
+                {'site': 'munpia', 'url_id': 14104, 'url_subject': 'test', 'results': [ ]},
+                {'site': 'naver', 'url_id': 7, 'url_subject': 'test', 'results': [ ]},
                 ]
 
         # load results
@@ -62,7 +93,7 @@ class TestCrawler(unittest.TestCase):
 
 
             doc = open('./testData/test_parse_valid_{0}.html'.format(c['site'])).read()
-            self.assertTrue(crawler.crawlFeed(c['site'], c['url_id'], doc))
+            self.assertTrue(crawler.crawlFeed(twt, c['site'], c['url_id'], c['url_subject'], doc))
             crawler.commit()
 
             cur.execute("SELECT id, subject, link FROM article WHERE site = ? AND url_id = ? ORDER BY id DESC", (c['site'], c['url_id']))
@@ -74,6 +105,8 @@ class TestCrawler(unittest.TestCase):
                 self.assertEqual(ret[i][2], c['results'][i][2])
 
     def test_parse_duplicate(self):
+        twt = resetTwitter()
+
         os.system("cp ./testData/empty.db ./feed.db")
         crawler = collect.Crawler('./feed.db')
 
@@ -93,21 +126,21 @@ class TestCrawler(unittest.TestCase):
 
 
             doc = open('./testData/test_parse_duplicate_{0}.html'.format(c['site'])).read()
-            self.assertTrue(crawler.crawlFeed(c['site'], c['url_id'], doc))
+            self.assertTrue(crawler.crawlFeed(twt, c['site'], c['url_id'], c['url_subject'], doc))
             crawler.commit()
             cur.execute("SELECT id, subject, link FROM article WHERE site = ? AND url_id = ? ORDER BY id DESC", (c['site'], c['url_id']))
             ret = cur.fetchall()
             self.assertEqual(len(ret), len(c['results'])-2)
 
             doc = open('./testData/test_parse_valid_{0}.html'.format(c['site'])).read()
-            self.assertTrue(crawler.crawlFeed(c['site'], c['url_id'], doc))
+            self.assertTrue(crawler.crawlFeed(twt, c['site'], c['url_id'], c['url_subject'], doc))
             crawler.commit()
             cur.execute("SELECT id, subject, link FROM article WHERE site = ? AND url_id = ? ORDER BY id DESC", (c['site'], c['url_id']))
             ret = cur.fetchall()
             self.assertEqual(len(ret), len(c['results']))
 
             doc = open('./testData/test_parse_valid_{0}.html'.format(c['site'])).read()
-            self.assertFalse(crawler.crawlFeed(c['site'], c['url_id'], doc))
+            self.assertFalse(crawler.crawlFeed(twt, c['site'], c['url_id'], c['url_subject'], doc))
             crawler.commit()
             cur.execute("SELECT id, subject, link FROM article WHERE site = ? AND url_id = ? ORDER BY id DESC", (c['site'], c['url_id']))
             ret = cur.fetchall()

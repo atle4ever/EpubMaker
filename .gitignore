@@ -1,6 +1,7 @@
 *.py[cod]
 .*.sw*
 feed.db
+*.cfg
 
 # C extensions
 *.so
