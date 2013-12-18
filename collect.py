@@ -129,12 +129,14 @@ def makeEpub(site, url_id):
         pageId += 1
         url = urlPrefix + str(pageId)
 
+    subject = doc.xpath(getXPath(site, 'FeedSubject'))[0].strip()
+        
     contents.reverse()
 
     f = codecs.open("test.html", 'w', encoding='utf-8')
-    f.write(u"<html><head><title>세이버나이츠</title></head><body>")
+    f.write(u"<html><head><title>{0}</title></head><body>".format(subject))
     for c in contents:
-        f.write(u"<h2>{0}</h2>".format(c[0]))
+        f.write(u"<h2 class=\"chapter\">{0}</h2>".format(c[0]))
         f.write(c[1])
     f.write(u"</body></html>")
     f.close()
