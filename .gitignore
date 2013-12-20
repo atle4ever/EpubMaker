@@ -2,6 +2,8 @@
 .*.sw*
 feed.db
 *.cfg
+config.py
+log
 
 # C extensions
 *.so

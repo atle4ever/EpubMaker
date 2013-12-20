@@ -1,0 +1,4 @@
+# please rename this file as 'config.py' and fill following lines
+FILESTORAGE = "/tmp"
+GMAIL_ACCOUNT = ""
+GMAIL_PASSWORD = ""
