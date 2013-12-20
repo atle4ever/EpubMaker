@@ -49,14 +49,16 @@ def createMessage(to, subject):
 
     return msg
 
-def sendMailWithFiles(files):
+def sendMailWithFiles(subject, content, files):
     import smtplib
     server = smtplib.SMTP( "smtp.gmail.com", 587 )
     server.ehlo()
     server.starttls()
     server.ehlo()
     server.login(GMAIL_ACCOUNT, GMAIL_PASSWORD)
-    msg = createMessage([GMAIL_ACCOUNT], "file-update")
+    subject = u"[EpubMaker] {0}: ({1}){2}".format(subject, content[2], content[0])
+
+    msg = createMessage([GMAIL_ACCOUNT], subject)
     attachFilesToMessages(msg, files)
     logger.debug("sending %s " % files)
     server.sendmail(GMAIL_ACCOUNT, [GMAIL_ACCOUNT], msg.as_string())
@@ -204,9 +206,9 @@ class Crawler(SqliteConnect):
         html.close()
 
         # convert html to epub
-        subprocess.call( ["ebook-convert", htmlFile, epubFile] , env = env)
+        subprocess.call( ["ebook-convert", htmlFile, epubFile, "--no-default-epub-cover"] , env = env)
 
-        sendMailWithFiles([epubFile])
+        sendMailWithFiles(url_subject, contents[0], [epubFile])
 
     def crawlList(self, site, url_id, doc, contents, minArticleId, updateMinArticleId):
         # html parsing
@@ -257,7 +259,7 @@ class Crawler(SqliteConnect):
             article_content = self.getContent(site, article_link)
 
             # append subject and content
-            contents.append( [article_subject, article_content] )
+            contents.append( [article_subject, article_content, article_id] )
 
             logger.debug(u"Add content {0} {1}".format(article_id, article_subject))
 
