@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import urllib2
 import sys
@@ -5,6 +6,14 @@ from lxml import etree
 import logging
 import ConfigParser
 import codecs
+
+from email.MIMEMultipart import MIMEMultipart
+from email.MIMEBase import MIMEBase
+from email.Utils import COMMASPACE, formatdate
+from email import Encoders
+
+import os, sys, subprocess
+from config import *
 
 # logger settting
 logger = logging.getLogger('EpubMaker')
@@ -70,6 +79,39 @@ def getContent(site, link):
 
     return etree.tostring(content)
 
+# Send mail via gmail (ref from https://github.com/ChristophGr/rss4kindle)
+def attachFilesToMessages(msg, files):
+    for f in files:
+        part = MIMEBase('application', "octet-stream")
+        content = open(f,"rb").read()
+        print type(content)
+        part.set_payload(content)
+        Encoders.encode_base64(part)
+        part.add_header('Content-Disposition', 'attachment; filename="%s"'
+                       % os.path.basename(f))
+        msg.attach(part)
+
+def createMessage(to, subject):
+    msg = MIMEMultipart()
+    msg['From'] = GMAIL_ACCOUNT
+    msg['To'] = COMMASPACE.join(to)
+    msg['Date'] = formatdate(localtime=True)
+    msg['Subject'] = subject
+
+    return msg
+
+def sendMailWithFiles(files):
+    import smtplib
+    server = smtplib.SMTP( "smtp.gmail.com", 587 )
+    server.ehlo()
+    server.starttls()
+    server.ehlo()
+    server.login(GMAIL_ACCOUNT, GMAIL_PASSWORD)
+    msg = createMessage([GMAIL_ACCOUNT], "file-update")
+    attachFilesToMessages(msg, files)
+    print("sending %s " % files)
+    server.sendmail(GMAIL_ACCOUNT, [GMAIL_ACCOUNT], msg.as_string())
+    server.close()
 
 def makeEpub(site, url_id):
     # get url_id and subject
@@ -124,7 +166,6 @@ def makeEpub(site, url_id):
         # check whether this page is last
         if article_id == 1:
             break
-        # break
 
         pageId += 1
         url = urlPrefix + str(pageId)
@@ -140,6 +181,22 @@ def makeEpub(site, url_id):
         f.write(c[1])
     f.write(u"</body></html>")
     f.close()
+
+    # run Xvfb for ebook-convert
+    x = None
+    env = os.environ
+    if "DISPLAY" not in env:
+        print "starting temporary Xserver"
+        x = subprocess.Popen("exec Xvfb :2 -screen 0 800x600x24", shell=True)
+        env["DISPLAY"] = "localhost:2"
+
+    subprocess.call( ["ebook-convert", "test.html", "test.epub"] , env = env)
+
+    if x != None:
+        print "terminating temporary Xserver"
+        x.terminate()
+
+    sendMailWithFiles(["test.epub"])
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
