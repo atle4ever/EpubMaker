@@ -100,6 +100,19 @@ class SqliteConnect:
                 'Content': "//*[@id=\"content\"]/div[1]/div[3]/div[1]",
                 'PagePrefix': "&page=",
                 },
+
+            'naver_challenge': {
+                'UrlFormat': "http://novel.naver.com/challenge/list.nhn?novelId={0}",
+                'FeedSubject': "//*[@id=\"content\"]/div/div[1]/div[1]/div/h2/text()",
+                'Articles': "//*[@id=\"content\"]/div/div[1]/table/tbody/tr",
+                'ArticleLink': ["./td[1]/a/@href", "./td[1]/div/a/@href"],
+                'ArticleSubject': ["./td[1]/a/text()", "./td[1]/div/a/text()"],
+                'ArticleId': '', 
+                'ArticleDate': "./td[2]/text()",
+                'ArticleLinkPrefix': 'http://novel.naver.com/',
+                'Content': "//*[@id=\"content\"]/div[1]/div[3]/div[1]",
+                'PagePrefix': "&page=",
+                },
             }
 
     def getXPath(self, site, target):
@@ -131,7 +144,7 @@ class SqliteConnect:
         content = contents[0]
     
         # for naver, remove icons from content
-        if site == 'naver':
+        if site[0:5] == 'naver':
             icons = content.xpath("./p/span[@class=\"ly_iconoff_wrap\"]")
             print len(icons)
             for ic in icons:
@@ -247,7 +260,7 @@ class Crawler(SqliteConnect):
             # get article's id
             xp = self.getXPath(site, 'ArticleId')
             if xp == '':
-                assert site == 'naver'
+                assert site[0:5] == 'naver'
                 article_id = article_link[article_link.rfind('volumeNo=') + 9:];
             else:
                 article_id = a.xpath(xp)[0]
