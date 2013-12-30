@@ -86,6 +86,7 @@ class SqliteConnect:
                 'ArticleDate': "./td[3]/text()",
                 'ArticleLinkPrefix': 'http://novel.munpia.com',
                 'Content': "//*[@class=\"tcontent\"]",
+                'PagePrefix': "/page/",
                 },
             'naver': {
                 'UrlFormat': "http://novel.naver.com/webnovel/list.nhn?novelId={0}",
@@ -96,6 +97,8 @@ class SqliteConnect:
                 'ArticleId': '', 
                 'ArticleDate': "./td[2]/text()",
                 'ArticleLinkPrefix': 'http://novel.naver.com/',
+                'Content': "//*[@id=\"content\"]/div[1]/div[3]/div[1]",
+                'PagePrefix': "&page=",
                 },
             }
 
@@ -127,7 +130,17 @@ class SqliteConnect:
         assert len(contents) == 1
         content = contents[0]
     
-        return etree.tostring(content)
+        # for naver, remove icons from content
+        if site == 'naver':
+            icons = content.xpath("./p/span[@class=\"ly_iconoff_wrap\"]")
+            print len(icons)
+            for ic in icons:
+                child = ic.xpath("./span")
+                assert len(child) == 1
+                ic.remove(child[0])
+
+        content = etree.tostring(content)
+        return content
 
 
 class Crawler(SqliteConnect):
@@ -159,12 +172,14 @@ class Crawler(SqliteConnect):
             logger.info("terminating temporary Xserver")
             x.terminate()
 
-
+    def genUrlWithPage(self, site, url_id):
+        return self.genUrl(site, url_id) + self.getXPath(site, 'PagePrefix')
+        
     def crawlFeed(self, site, url_id, url_subject, minArticleId, env):
         logger.info(u"Start feed {0} ({1}, {2})".format(url_subject, site, url_id))
 
         pageId = 1
-        urlPrefix = self.genUrl(site, url_id) + "/page/"
+        urlPrefix = self.genUrlWithPage(site, url_id)
 
         updateMinArticleId = True
         contents = []
@@ -222,6 +237,13 @@ class Crawler(SqliteConnect):
             if len(article_class) > 0 and article_class[0] == "notice":
                 continue
 
+            # get article's link
+            for xp in self.getXPath(site, 'ArticleLink'):
+                link_node = a.xpath(xp)
+                if len(link_node) != 0: break;
+            assert len(link_node) != 0, "Fail to get article's link"
+            article_link = self.getXPath(site, 'ArticleLinkPrefix') + link_node[0]
+
             # get article's id
             xp = self.getXPath(site, 'ArticleId')
             if xp == '':
@@ -241,12 +263,6 @@ class Crawler(SqliteConnect):
                 self.con.execute("UPDATE url SET minArticleId = ? WHERE site = ? AND id = ?", (article_id+1, site, url_id))
                 logger.info("Update minArticleId {0} -> {1}".format(minArticleId, article_id))
 
-            # get article's link
-            for xp in self.getXPath(site, 'ArticleLink'):
-                link_node = a.xpath(xp)
-                if len(link_node) != 0: break;
-            assert len(link_node) != 0, "Fail to get article's link"
-            article_link = self.getXPath(site, 'ArticleLinkPrefix') + link_node[0]
 
             # get article's subject
             for xp in self.getXPath(site, 'ArticleSubject'):
