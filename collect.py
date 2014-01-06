@@ -57,7 +57,7 @@ def createMessage(to, subject):
 
     return msg
 
-def sendMailWithFiles(subject, content, files):
+def sendMailWithFiles(subject, emails, content, files):
     import smtplib
     server = smtplib.SMTP( "smtp.gmail.com", 587 )
     server.ehlo()
@@ -66,7 +66,7 @@ def sendMailWithFiles(subject, content, files):
     server.login(GMAIL_ACCOUNT, GMAIL_PASSWORD)
     subject = u"[EpubMaker] {0}: ({1}){2}".format(subject, content[0][2], content[0][0])
 
-    msg = createMessage([GMAIL_ACCOUNT], subject)
+    msg = createMessage(emails.split(' '), subject)
     attachBodyToMessages(msg, content)
     attachFilesToMessages(msg, files)
     logger.debug("sending %s " % files)
@@ -82,7 +82,7 @@ class SqliteConnect:
         existing = self.cur.execute("SELECT name FROM sqlite_master WHERE type = 'table' and name = 'url'").fetchone()
         if existing:
             return
-        self.cur.execute("CREATE TABLE url (site VARCHAR(20), id INTEGER, subject VARCHAR(1024), minArticleId INTEGER, primary key(site, id))")
+        self.cur.execute("CREATE TABLE url (site VARCHAR(20), id INTEGER, subject VARCHAR(1024), minArticleId INTEGER, emails VARCHAR(1024), primary key(site, id))")
 
     xpath = {
             'munpia': {
@@ -174,7 +174,7 @@ class SqliteConnect:
 class Crawler(SqliteConnect):
     def crawl(self):
         # get url_id and subject
-        self.cur.execute("SELECT site, id, subject, minArticleId FROM url")
+        self.cur.execute("SELECT site, id, subject, minArticleId, emails FROM url")
         urls = self.cur.fetchall()
         
         # run Xvfb for ebook-convert
@@ -190,8 +190,9 @@ class Crawler(SqliteConnect):
             url_id = url[1]
             url_subject = url[2]
             minArticleId = url[3]
+            emails = url[4]
             
-            self.crawlFeed(site, url_id, url_subject, minArticleId, env)
+            self.crawlFeed(site, url_id, url_subject, minArticleId, emails, env)
             self.con.commit()
 
         self.con.close()
@@ -203,7 +204,7 @@ class Crawler(SqliteConnect):
     def genUrlWithPage(self, site, url_id):
         return self.genUrl(site, url_id) + self.getXPath(site, 'PagePrefix')
         
-    def crawlFeed(self, site, url_id, url_subject, minArticleId, env):
+    def crawlFeed(self, site, url_id, url_subject, minArticleId, emails, env):
         logger.info(u"Start feed {0} ({1}, {2})".format(url_subject, site, url_id))
 
         pageId = 1
@@ -251,7 +252,7 @@ class Crawler(SqliteConnect):
         # convert html to epub
         subprocess.call( ["ebook-convert", htmlFile, epubFile, "--no-default-epub-cover"] , env = env)
 
-        sendMailWithFiles(url_subject, contents, [epubFile])
+        sendMailWithFiles(url_subject, emails, contents, [epubFile])
 
     def crawlList(self, site, url_id, doc, contents, minArticleId, updateMinArticleId):
         # html parsing
@@ -311,26 +312,39 @@ class Crawler(SqliteConnect):
 
 
 class FeedManager(SqliteConnect):
-    def addFeed(self, site, url_id):
+    def addFeed(self, site, url_id, email):
         # get url_id and subject
-        self.cur.execute("SELECT count(*) FROM url WHERE site = ? AND id = ?", (site, url_id))
-        ret = self.cur.fetchone()
-        if ret[0] != 0:
-            logger.warning ( u"Existing url id {0}".format(url_id) )
+        self.cur.execute("SELECT site, id, emails FROM url WHERE site = ? AND id = ?", (site, url_id))
+        ret = self.cur.fetchall()
+
+        emails = ''
+        if len(ret) == 0:
+            # get subject
+            url = self.genUrl(site, url_id)
+            usock = urllib2.urlopen(url)
+            doc = usock.read()
+            usock.close()
+                
+            hparser = etree.HTMLParser(encoding='utf-8')
+            doc = etree.fromstring(doc, hparser)
+            subject = doc.xpath(self.getXPath(site, 'FeedSubject'))[0].strip()
+    
+            self.cur.execute("INSERT INTO url(site, id, subject, minArticleId) VALUES (?, ?, ?, 1)", (site, url_id, subject))
+            logger.info( u"New feed is added: {0} ({1}, {2})".format(subject, site, url_id) )
+        elif len(ret) == 1:
+            emails = ret[0][2]
+        else:
+            logger.error ( u"Duplicate novel (site: {0}, id: {1})".format(site, url_id) )
             return False
-    
-        # get subject
-        url = self.genUrl(site, url_id)
-        usock = urllib2.urlopen(url)
-        doc = usock.read()
-        usock.close()
-            
-        hparser = etree.HTMLParser(encoding='utf-8')
-        doc = etree.fromstring(doc, hparser)
-        subject = doc.xpath(self.getXPath(site, 'FeedSubject'))[0].strip()
-    
-        self.cur.execute("INSERT INTO url(site, id, subject, minArticleId) VALUES (?, ?, ?, 1)", (site, url_id, subject))
-        logger.info( u"New feed is added: {0} ({1}, {2})".format(subject, site, url_id) )
+
+        if emails.find(email) != -1: # already email is in emails
+            logger.error ( u"Email is already added (email: {0}, emails: {1})".format(email, emails) )
+            return False
+
+        emails += " " + email
+        self.cur.execute("UPDATE url SET emails = ? WHERE site = ? AND id = ?", (emails, site, url_id))
+        logger.error ( u"Email is added (email: {0}, emails: {1})".format(email, emails) )
+
         self.con.commit()
 
         return True
@@ -339,7 +353,7 @@ def main():
     def usage():
         logger.error( "Invalid usage" )
         logger.error( "usage 1: python {0} crawl".format(sys.argv[0]) )
-        logger.error( "usage 2: python {0} add <site> <url id>".format(sys.argv[0]) )
+        logger.error( "usage 2: python {0} add <site> <url id> <email>".format(sys.argv[0]) )
         return
     
     if len(sys.argv) == 1:
@@ -350,15 +364,16 @@ def main():
         crawler = Crawler('./feed.db')
         crawler.crawl()
     else: # add command
-        if len(sys.argv) < 4:
+        if len(sys.argv) < 5:
             usage()
             sys.exit(-1)
     
         site = sys.argv[2]
         url_id = int(sys.argv[3])
+        email = sys.argv[4]
     
         manager = FeedManager('./feed.db')
-        manager.addFeed(site, url_id)
+        manager.addFeed(site, url_id, email)
 
 if __name__ == "__main__":
     main()
