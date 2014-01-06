@@ -144,7 +144,11 @@ class SqliteConnect:
         usock = urllib2.urlopen(link)
         doc = usock.read()
         usock.close()
-    
+
+        # convert windows newline into unix style
+        doc = doc.replace('\n\r', '<br />')
+        doc = doc.replace('\r', '<br />')
+
         # html parsing
         hparser = etree.HTMLParser(encoding='utf-8')
         doc = etree.fromstring(doc, hparser)
@@ -154,6 +158,17 @@ class SqliteConnect:
     
         # for naver, remove icons from content
         if site[0:5] == 'naver':
+            talks = content.xpath("./p[@class=\"talk\"]")
+            for t in talks:
+                child = t.xpath("./a[@class=\"ico_talk _toggleDialogLayer()\"]")
+                
+                if len(child) == 1:
+                    t.remove(child[0])
+                elif len(child) == 0:
+                    continue
+                else:
+                    assert False
+
             icons = content.xpath("./p/span[@class=\"ly_iconoff_wrap\"]")
             for ic in icons:
                 child = ic.xpath("./span")
@@ -338,12 +353,12 @@ class FeedManager(SqliteConnect):
             return False
 
         if emails.find(email) != -1: # already email is in emails
-            logger.error ( u"Email is already added (email: {0}, emails: {1})".format(email, emails) )
+            logger.warning( u"Email is already added (email: {0}, emails: {1})".format(email, emails) )
             return False
 
         emails += " " + email
         self.cur.execute("UPDATE url SET emails = ? WHERE site = ? AND id = ?", (emails, site, url_id))
-        logger.error ( u"Email is added (email: {0}, emails: {1})".format(email, emails) )
+        logger.info( u"Email is added (email: {0}, emails: {1})".format(email, emails) )
 
         self.con.commit()
 
