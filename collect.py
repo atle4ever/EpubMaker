@@ -10,6 +10,7 @@ import codecs
 
 from email.MIMEMultipart import MIMEMultipart
 from email.MIMEBase import MIMEBase
+from email.MIMEText import MIMEText
 from email.Utils import COMMASPACE, formatdate
 from email import Encoders
 
@@ -40,6 +41,13 @@ def attachFilesToMessages(msg, files):
                        % os.path.basename(f))
         msg.attach(part)
 
+def attachBodyToMessages(msg, content):
+    body = ""
+    for c in content:
+        body += u'<a href="{0}">{1}</a><br />'.format(c[3], c[0])
+
+    msg.attach(MIMEText(body, 'html', 'utf-8'))
+
 def createMessage(to, subject):
     msg = MIMEMultipart()
     msg['From'] = GMAIL_ACCOUNT
@@ -56,9 +64,10 @@ def sendMailWithFiles(subject, content, files):
     server.starttls()
     server.ehlo()
     server.login(GMAIL_ACCOUNT, GMAIL_PASSWORD)
-    subject = u"[EpubMaker] {0}: ({1}){2}".format(subject, content[2], content[0])
+    subject = u"[EpubMaker] {0}: ({1}){2}".format(subject, content[0][2], content[0][0])
 
     msg = createMessage([GMAIL_ACCOUNT], subject)
+    attachBodyToMessages(msg, content)
     attachFilesToMessages(msg, files)
     logger.debug("sending %s " % files)
     server.sendmail(GMAIL_ACCOUNT, [GMAIL_ACCOUNT], msg.as_string())
@@ -146,13 +155,19 @@ class SqliteConnect:
         # for naver, remove icons from content
         if site[0:5] == 'naver':
             icons = content.xpath("./p/span[@class=\"ly_iconoff_wrap\"]")
-            print len(icons)
             for ic in icons:
                 child = ic.xpath("./span")
                 assert len(child) == 1
                 ic.remove(child[0])
 
         content = etree.tostring(content)
+
+        # add link to content and comments
+        content += u'<a href="{0}">[본문 링크]</a>'.format(link)
+        if site == 'munpia':
+            content += u'<a href="{0}/nvView/viewComments/">[댓글 보기]</a>'.format(link)
+        content += '<br />'
+
         return content
 
 
@@ -236,7 +251,7 @@ class Crawler(SqliteConnect):
         # convert html to epub
         subprocess.call( ["ebook-convert", htmlFile, epubFile, "--no-default-epub-cover"] , env = env)
 
-        sendMailWithFiles(url_subject, contents[0], [epubFile])
+        sendMailWithFiles(url_subject, contents, [epubFile])
 
     def crawlList(self, site, url_id, doc, contents, minArticleId, updateMinArticleId):
         # html parsing
@@ -288,7 +303,7 @@ class Crawler(SqliteConnect):
             article_content = self.getContent(site, article_link)
 
             # append subject and content
-            contents.append( [article_subject, article_content, article_id] )
+            contents.append( [article_subject, article_content, article_id, article_link] )
 
             logger.debug(u"Add content {0} {1}".format(article_id, article_subject))
 
