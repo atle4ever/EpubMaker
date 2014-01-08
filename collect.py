@@ -60,9 +60,7 @@ def createMessage(to, subject):
 def sendMailWithFiles(subject, emails, content, files):
     import smtplib
     server = smtplib.SMTP( "smtp.gmail.com", 587 )
-    server.ehlo()
     server.starttls()
-    server.ehlo()
     server.login(GMAIL_ACCOUNT, GMAIL_PASSWORD)
     subject = u"[EpubMaker] {0}: ({1}){2}".format(subject, content[0][2], content[0][0])
 
@@ -70,7 +68,7 @@ def sendMailWithFiles(subject, emails, content, files):
     attachBodyToMessages(msg, content)
     attachFilesToMessages(msg, files)
     logger.debug("sending %s " % files)
-    server.sendmail(GMAIL_ACCOUNT, [GMAIL_ACCOUNT], msg.as_string())
+    server.sendmail(GMAIL_ACCOUNT, emails.split(' '), msg.as_string())
     server.close()
 
 class SqliteConnect:
