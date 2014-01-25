@@ -22,7 +22,10 @@ exports.index = function(req, res) {
                 }
             }
             console.log(rows);
-            res.render('index', { urls: rows });
+            var jade = require('jade');
+            var html = jade.renderFile('views/index.jade', { urls: rows });
+            console.log(html);
+            res.send(html);
         });
     });
 };

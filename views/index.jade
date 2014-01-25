@@ -1,0 +1,49 @@
+doctype html
+html
+
+    head
+        meta(charset='utf-8')
+        meta(http-equiv='X-UA-Compatible', content='IE=edge')
+        meta(name='viewport' content='width=device-width, initial-scale=1.0')
+        meta(name='description', content='')
+        meta(name='author', content='')
+    
+        title Epub Maker - Web UI
+    
+        // link CSS
+        link(href='stylesheets/bootstrap.css', rel='stylesheet')
+        link(href='stylesheets/index.css', rel='stylesheet')
+    
+    body
+        .container
+            table.table.table-hover.table-striped: tbody
+                for url in urls
+                    tr
+                        td: span= url.subject
+                        td
+                            // display emails
+                            for email, i in url.emails
+                                button.btn.btn-primary.btn-xs(type='button')= email
+                                    if url.emails.length != 1
+                                        = ' '
+                                        a(href=url.delete_emails[i]): span.glyphicon.glyphicon-remove.white
+                                = ' '
+    
+                            // button - add email
+                            button.btn.btn-primary.btn-xs(type='button', onClick="add_email_input('#{url.site}', '#{url.id}')")
+                                span.glyphicon.glyphicon-plus.white
+    
+        // include javascript
+        script(src='https://code.jquery.com/jquery-1.10.2.min.js')
+        script(src='javascripts/bootstrap.min.js')
+        script.
+            function add_email_input(site, id) {
+                var email = window.prompt('새로 추가할 이메일 주소를 입력하세요.', 'test@example.com');
+                if(email != null) {
+                    var params = { 'site': site, 'id': id, 'email': email };
+                    $.get('/add_email', params, function(data) {
+                        window.location.href = "/";
+                    });
+                }
+                return true;
+            }
