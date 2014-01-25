@@ -39,3 +39,21 @@ nosetests.xml
 .mr.developer.cfg
 .project
 .pydevproject
+
+# for nodeJS
+ib-cov
+*.seed
+*.log
+*.csv
+*.dat
+*.out
+*.pid
+*.gz
+.*.swp
+
+pids
+logs
+results
+
+npm-debug.log
+node_modules
