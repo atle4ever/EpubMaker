@@ -158,7 +158,7 @@ class SqliteConnect:
     
         # for naver, remove icons from content
         if site[0:5] == 'naver':
-            talks = content.xpath("./p[@class=\"talk\"]")
+            talks = content.xpath("./p[@class=\"talk\"] | ./p[@class=\"talk last\"] ")
             for t in talks:
                 child = t.xpath("./a[@class=\"ico_talk _toggleDialogLayer()\"]")
                 
