@@ -94,6 +94,7 @@ class SqliteConnect:
                 'ArticleLinkPrefix': 'http://novel.munpia.com',
                 'Content': "//*[@class=\"tcontent\"]",
                 'PagePrefix': "/page/",
+                'WriterMsg': '//*[@id="ENTRY-CONTENT"]/dl',
                 },
             'naver': {
                 'UrlFormat': "http://novel.naver.com/webnovel/list.nhn?novelId={0}",
@@ -106,6 +107,7 @@ class SqliteConnect:
                 'ArticleLinkPrefix': 'http://novel.naver.com/',
                 'Content': "//*[@id=\"content\"]/div[1]/div[3]/div[1]",
                 'PagePrefix': "&page=",
+                'WriterMsg': '//*[@id="content"]/div[1]/div[4]/dl',
                 },
 
             'naver_challenge': {
@@ -143,9 +145,9 @@ class SqliteConnect:
         doc = usock.read()
         usock.close()
 
-        # convert windows newline into unix style
-        doc = doc.replace('\n\r', '<br />')
-        doc = doc.replace('\r', '<br />')
+        # convert windows newline into unix style (for naver)
+        if site[0:5] == 'naver':
+            doc = doc.replace('\r\n', '<br />')
 
         # html parsing
         hparser = etree.HTMLParser(encoding='utf-8')
@@ -173,6 +175,11 @@ class SqliteConnect:
                 assert len(child) == 1
                 ic.remove(child[0])
 
+        # get writer's comments
+        comments = doc.xpath(self.getXPath(site, 'WriterMsg'))
+        if len(comments) == 1:
+            content.append(comments[0])
+        
         content = etree.tostring(content)
 
         # add link to content and comments
