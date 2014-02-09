@@ -121,6 +121,7 @@ class SqliteConnect:
                 'ArticleLinkPrefix': 'http://novel.naver.com/',
                 'Content': "//*[@id=\"content\"]/div[1]/div[3]/div[1]",
                 'PagePrefix': "&page=",
+                'WriterMsg': '//*[@id="content"]/div[1]/div[4]/dl',
                 },
             }
 
@@ -179,6 +180,11 @@ class SqliteConnect:
         comments = doc.xpath(self.getXPath(site, 'WriterMsg'))
         if len(comments) == 1:
             content.append(comments[0])
+
+        # download images
+        imgs = content.xpath('//img')
+        for img in imgs:
+            print etree.tostring(img)
         
         content = etree.tostring(content)
 
