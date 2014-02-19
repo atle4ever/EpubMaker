@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import urllib2
 import sqlite3 as lite
 import sys
 from lxml import etree
 import logging
 import ConfigParser
 import codecs
+import pycurl
 
 from email.MIMEMultipart import MIMEMultipart
 from email.MIMEBase import MIMEBase
@@ -70,6 +70,14 @@ def sendMailWithFiles(subject, emails, content, files):
     logger.debug("sending %s " % files)
     server.sendmail(GMAIL_ACCOUNT, emails.split(' '), msg.as_string())
     server.close()
+
+
+class CurlCallback:
+    def __init__(self):
+        self.result = ''
+
+    def curlCallback(self, buf):
+        self.result = self.result + buf
 
 class SqliteConnect:
     def __init__(self, dbPath):
@@ -142,9 +150,7 @@ class SqliteConnect:
 
     def getContent(self, site, link):
         # get html
-        usock = urllib2.urlopen(link)
-        doc = usock.read()
-        usock.close()
+        doc = self.getHTML(link)
 
         # convert windows newline into unix style (for naver)
         if site[0:5] == 'naver':
@@ -196,6 +202,18 @@ class SqliteConnect:
 
         return content
 
+    def getHTML(self, url):
+        # get html content by curl
+        cb = CurlCallback()
+
+        pc = pycurl.Curl()
+        pc.setopt(pc.URL, url)
+        pc.setopt(pc.WRITEFUNCTION, cb.curlCallback)
+        pc.perform()
+        pc.close()
+
+        return cb.result
+
 
 class Crawler(SqliteConnect):
     def crawl(self):
@@ -243,9 +261,7 @@ class Crawler(SqliteConnect):
             urlArticleList = urlPrefix + str(pageId)
 
             # get html
-            usock = urllib2.urlopen(urlArticleList)
-            doc = usock.read()
-            usock.close()
+            doc = self.getHTML(urlArticleList)
 
             endLoop = self.crawlList(site, url_id, doc, contents, minArticleId, updateMinArticleId)
 
@@ -347,9 +363,7 @@ class FeedManager(SqliteConnect):
         if len(ret) == 0:
             # get subject
             url = self.genUrl(site, url_id)
-            usock = urllib2.urlopen(url)
-            doc = usock.read()
-            usock.close()
+            doc = self.getHTML(url)
                 
             hparser = etree.HTMLParser(encoding='utf-8')
             doc = etree.fromstring(doc, hparser)
