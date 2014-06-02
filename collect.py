@@ -95,9 +95,9 @@ class SqliteConnect:
                 'UrlFormat': "http://novel.munpia.com/{0}",
                 'FeedSubject': "//*[@id=\"board\"]/div[1]/div[2]/h2/a/text()",
                 'Articles': "//*[@id=\"ENTRIES\"]/tbody/tr",
-                'ArticleLink': ["./td[2]/a[1]/@href", ],
-                'ArticleSubject': ["./td[2]/a[1]/text()", ],
-                'ArticleId': "./td[1]/span/text()",
+                'ArticleLink': ["./td[2]/a[1]/@href", "./td[3]/a[1]/@href"],
+                'ArticleSubject': ["./td[2]/a[1]/text()", "./td[3]/a[1]/text()"],
+                'ArticleId': ["./td[1]/span/text()", "./td[2]/span/text()"],
                 'ArticleDate': "./td[3]/text()",
                 'ArticleLinkPrefix': 'http://novel.munpia.com',
                 'Content': "//*[@class=\"tcontent\"]",
@@ -110,7 +110,7 @@ class SqliteConnect:
                 'Articles': "//*[@id=\"content\"]/div/div[1]/table/tbody/tr",
                 'ArticleLink': ["./td[1]/a/@href", "./td[1]/div/a/@href"],
                 'ArticleSubject': ["./td[1]/a/text()", "./td[1]/div/a/text()"],
-                'ArticleId': '', 
+                'ArticleId': '',
                 'ArticleDate': "./td[2]/text()",
                 'ArticleLinkPrefix': 'http://novel.naver.com/',
                 'Content': "//*[@id=\"content\"]/div[1]/div[3]/div[1]",
@@ -124,7 +124,7 @@ class SqliteConnect:
                 'Articles': "//*[@id=\"content\"]/div/div[1]/table/tbody/tr",
                 'ArticleLink': ["./td[1]/a/@href", "./td[1]/div/a/@href"],
                 'ArticleSubject': ["./td[1]/a/text()", "./td[1]/div/a/text()"],
-                'ArticleId': '', 
+                'ArticleId': '',
                 'ArticleDate': "./td[2]/text()",
                 'ArticleLinkPrefix': 'http://novel.naver.com/',
                 'Content': "//*[@id=\"content\"]/div[1]/div[3]/div[1]",
@@ -141,7 +141,7 @@ class SqliteConnect:
         assert xp != None, "Invalid target: '{0}' for '{1}'".format(target, site)
 
         return xp
-            
+
     def genUrl(self, site, url_id):
         return self.getXPath(site, 'UrlFormat').format(url_id)
 
@@ -162,13 +162,13 @@ class SqliteConnect:
         contents = doc.xpath(self.getXPath(site, 'Content'))
         assert len(contents) == 1
         content = contents[0]
-    
+
         # for naver, remove icons from content
         if site[0:5] == 'naver':
             talks = content.xpath("./p[@class=\"talk\"] | ./p[@class=\"talk last\"] ")
             for t in talks:
                 child = t.xpath("./a[@class=\"ico_talk _toggleDialogLayer()\"]")
-                
+
                 if len(child) == 1:
                     t.remove(child[0])
                 elif len(child) == 0:
@@ -191,7 +191,7 @@ class SqliteConnect:
         imgs = content.xpath('//img')
         for img in imgs:
             print etree.tostring(img)
-        
+
         content = etree.tostring(content)
 
         # add link to content and comments
@@ -220,7 +220,7 @@ class Crawler(SqliteConnect):
         # get url_id and subject
         self.cur.execute("SELECT site, id, subject, minArticleId, emails FROM url")
         urls = self.cur.fetchall()
-        
+
         # run Xvfb for ebook-convert
         x = None
         env = os.environ
@@ -235,7 +235,7 @@ class Crawler(SqliteConnect):
             url_subject = url[2]
             minArticleId = url[3]
             emails = url[4]
-            
+
             self.crawlFeed(site, url_id, url_subject, minArticleId, emails, env)
             self.con.commit()
 
@@ -247,7 +247,7 @@ class Crawler(SqliteConnect):
 
     def genUrlWithPage(self, site, url_id):
         return self.genUrl(site, url_id) + self.getXPath(site, 'PagePrefix')
-        
+
     def crawlFeed(self, site, url_id, url_subject, minArticleId, emails, env):
         logger.info(u"Start feed {0} ({1}, {2})".format(url_subject, site, url_id))
 
@@ -271,10 +271,10 @@ class Crawler(SqliteConnect):
 
             pageId += 1
             updateMinArticleId = False
-            
+
         if len(contents) == 0:
             return
-        
+
 
         contents.reverse()
 
@@ -321,7 +321,11 @@ class Crawler(SqliteConnect):
                 assert site[0:5] == 'naver'
                 article_id = article_link[article_link.rfind('volumeNo=') + 9:];
             else:
-                article_id = a.xpath(xp)[0]
+                for xp in self.getXPath(site, 'ArticleId'):
+                    article_id = a.xpath(xp)
+                    if len(article_id) != 0: break;
+                assert len(article_id) != 0, "Fail to get article's id"
+                article_id = article_id[0]
             article_id = int(article_id)
 
             # if articles are read, return
@@ -341,7 +345,7 @@ class Crawler(SqliteConnect):
                 if len(subject_node) != 0: break;
             assert len(subject_node) != 0, "Fail to get article's subject"
             article_subject = subject_node[0]
-    
+
             # get article's content
             article_content = self.getContent(site, article_link)
 
@@ -364,11 +368,11 @@ class FeedManager(SqliteConnect):
             # get subject
             url = self.genUrl(site, url_id)
             doc = self.getHTML(url)
-                
+
             hparser = etree.HTMLParser(encoding='utf-8')
             doc = etree.fromstring(doc, hparser)
             subject = doc.xpath(self.getXPath(site, 'FeedSubject'))[0].strip()
-    
+
             self.cur.execute("INSERT INTO url(site, id, subject, minArticleId) VALUES (?, ?, ?, 1)", (site, url_id, subject))
             logger.info( u"New feed is added: {0} ({1}, {2})".format(subject, site, url_id) )
         elif len(ret) == 1:
@@ -395,11 +399,11 @@ def main():
         logger.error( "usage 1: python {0} crawl".format(sys.argv[0]) )
         logger.error( "usage 2: python {0} add <site> <url id> <email>".format(sys.argv[0]) )
         return
-    
+
     if len(sys.argv) == 1:
         usage()
         sys.exit(-1)
-    
+
     if sys.argv[1] == 'crawl':
         crawler = Crawler('./feed.db')
         crawler.crawl()
@@ -407,11 +411,11 @@ def main():
         if len(sys.argv) < 5:
             usage()
             sys.exit(-1)
-    
+
         site = sys.argv[2]
         url_id = int(sys.argv[3])
         email = sys.argv[4]
-    
+
         manager = FeedManager('./feed.db')
         manager.addFeed(site, url_id, email)
 
